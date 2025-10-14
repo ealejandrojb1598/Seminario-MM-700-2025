@@ -443,8 +443,6 @@ cat("✓ Graficos avanzados generados\n")
 
 cat("\n=== GENERANDO REPORTE HTML ===\n")
 
-# [AQUI IRIA EL CODIGO COMPLETO DEL REPORTE HTML QUE TE PASE ANTES]
-# (Es muy largo, pero incluye todo el HTML con metricas, graficos, etc.)
 
 # =============================================================================
 # 16. RESUMEN Y GUARDADO DEL MODELO
