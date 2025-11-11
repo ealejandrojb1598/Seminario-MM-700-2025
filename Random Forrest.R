@@ -561,7 +561,7 @@ if(mejor_metodo_cv == "rose") {
 }
 
 # ======================================================================
-# 24. GUARDADO FINAL
+# 24. GUARDADO DE RESULTADOS DE AMBOS MODELOS
 # ========================================================================
 saveRDS(modelo_rf_rose, "resultados/modelo_rf_rose.rds")
 saveRDS(modelo_rf_under, "resultados/modelo_rf_under.rds")
@@ -577,3 +577,407 @@ cat("ANALISIS COMPLETADO EXITOSAMENTE CON RANDOM FOREST\n")
 cat(strrep("=", 60), "\n")
 
 as.data.frame(resumen_cv)
+
+# ========================================================================
+# 25. INTERVALOS DE CONFIANZA Y CURVAS PRECISION-RECALL
+# ========================================================================
+
+
+# ========================================================================
+# PARTE 1: INTERVALOS DE CONFIANZA (95%)
+# ========================================================================
+
+cat("\n")
+cat(strrep("=", 70), "\n")
+cat("CÁLCULO DE INTERVALOS DE CONFIANZA (95%)\n")
+cat(strrep("=", 70), "\n\n")
+
+# Función para calcular IC usando método de Wilson
+calcular_ic_wilson <- function(x, n, nivel = 0.95) {
+  # x = número de éxitos
+  # n = número total
+  # nivel = nivel de confianza (0.95 para 95%)
+  
+  if(n == 0) return(c(0, 0))
+  
+  z <- qnorm((1 + nivel) / 2)  # Valor z para el nivel de confianza
+  p <- x / n
+  
+  denominador <- 1 + z^2 / n
+  centro <- (p + z^2 / (2 * n)) / denominador
+  margen <- z * sqrt(p * (1 - p) / n + z^2 / (4 * n^2)) / denominador
+  
+  ic_inf <- max(0, centro - margen)
+  ic_sup <- min(1, centro + margen)
+  
+  return(c(ic_inf, ic_sup))
+}
+
+# Función para calcular IC de todas las métricas
+calcular_ic_metricas <- function(matriz_confusion, nombre_metodo, verbose = FALSE) {
+  
+  # Extraer valores de la matriz
+  tn <- matriz_confusion$table[1,1]  # Verdaderos Negativos
+  fp <- matriz_confusion$table[1,2]  # Falsos Positivos
+  fn <- matriz_confusion$table[2,1]  # Falsos Negativos
+  tp <- matriz_confusion$table[2,2]  # Verdaderos Positivos
+  
+  total <- tn + fp + fn + tp
+  total_positivos <- tp + fn
+  total_negativos <- tn + fp
+  total_pred_positivos <- tp + fp
+  
+  if(verbose) {
+    cat("\n", nombre_metodo, ":\n")
+    cat("  TP:", tp, "| FP:", fp, "| TN:", tn, "| FN:", fn, "\n")
+  }
+  
+  # Calcular valores y IC para cada métrica
+  
+  # 1. Accuracy = (TP + TN) / Total
+  accuracy_val <- (tn + tp) / total
+  ic_accuracy <- calcular_ic_wilson(tn + tp, total)
+  
+  # 2. Sensibilidad (Recall/TPR) = TP / (TP + FN)
+  sensitivity_val <- tp / total_positivos
+  ic_sensitivity <- calcular_ic_wilson(tp, total_positivos)
+  
+  # 3. Especificidad (TNR) = TN / (TN + FP)
+  specificity_val <- tn / total_negativos
+  ic_specificity <- calcular_ic_wilson(tn, total_negativos)
+  
+  # 4. Precisión (PPV) = TP / (TP + FP)
+  precision_val <- tp / total_pred_positivos
+  ic_precision <- calcular_ic_wilson(tp, total_pred_positivos)
+  
+  if(verbose) {
+    cat("  Accuracy:", round(accuracy_val * 100, 2), "%\n")
+    cat("  Sensibilidad:", round(sensitivity_val * 100, 2), "%\n")
+    cat("  Especificidad:", round(specificity_val * 100, 2), "%\n")
+    cat("  Precisión:", round(precision_val * 100, 2), "%\n")
+  }
+  
+  # Crear dataframe con resultados (ORDEN CORREGIDO)
+  resultados_ic <- data.frame(
+    Metodo = rep(nombre_metodo, 4),
+    Metrica = c("Accuracy", "Precisión", "Especificidad", "Sensibilidad"),
+    Valor = round(c(accuracy_val, precision_val, specificity_val, sensitivity_val) * 100, 2),
+    IC_Inferior = round(c(ic_accuracy[1], ic_precision[1], ic_specificity[1], ic_sensitivity[1]) * 100, 2),
+    IC_Superior = round(c(ic_accuracy[2], ic_precision[2], ic_specificity[2], ic_sensitivity[2]) * 100, 2),
+    Amplitud = round(c(
+      ic_accuracy[2] - ic_accuracy[1],
+      ic_precision[2] - ic_precision[1],
+      ic_specificity[2] - ic_specificity[1],
+      ic_sensitivity[2] - ic_sensitivity[1]
+    ) * 100, 2)
+  )
+  
+  return(resultados_ic)
+}
+
+# ========================================================================
+# 25.1 CALCULAR IC PARA TODAS LAS CONFIGURACIONES
+# ========================================================================
+
+# IC para ROSE (umbral 0.5)
+cat("Calculando IC para ROSE (umbral 0.5)...\n")
+ic_rose_05 <- calcular_ic_metricas(matriz_confusion_rose, "ROSE (0.5)", verbose = TRUE)
+
+# IC para ROSE (umbral optimizado)
+cat("\nCalculando IC para ROSE (umbral optimizado 0.275)...\n")
+ic_rose_opt <- calcular_ic_metricas(matriz_optimizada_rose, "ROSE (0.275)", verbose = TRUE)
+
+# IC para Under-Sampling (umbral 0.5)
+cat("\nCalculando IC para Under-Sampling (umbral 0.5)...\n")
+ic_under_05 <- calcular_ic_metricas(matriz_confusion_under, "Under (0.5)", verbose = TRUE)
+
+# IC para Under-Sampling (umbral optimizado)
+cat("\nCalculando IC para Under-Sampling (umbral optimizado 0.185)...\n")
+ic_under_opt <- calcular_ic_metricas(matriz_optimizada_under, "Under (0.185)", verbose = TRUE)
+
+# Combinar todos los resultados
+ic_completos <- rbind(ic_rose_05, ic_rose_opt, ic_under_05, ic_under_opt)
+
+# Mostrar resultados
+cat("\n")
+cat(strrep("=", 70), "\n")
+cat("RESULTADOS: INTERVALOS DE CONFIANZA (95%)\n")
+cat(strrep("=", 70), "\n")
+print(ic_completos, row.names = FALSE)
+
+# Guardar
+write.csv(ic_completos, "resultados/intervalos_confianza.csv", row.names = FALSE)
+cat("\nResultados guardados en: resultados/intervalos_confianza.csv\n")
+
+# ========================================================================
+# 25.2 VISUALIZACIÓN DE INTERVALOS DE CONFIANZA
+# ========================================================================
+
+cat("\nGenerando gráfico de intervalos de confianza...\n")
+
+# Preparar datos para gráfico
+ic_completos$Metodo <- factor(ic_completos$Metodo, 
+                              levels = c("ROSE (0.5)", "ROSE (0.275)", 
+                                         "Under (0.5)", "Under (0.185)"))
+
+# Crear gráfico
+p_ic <- ggplot(ic_completos, aes(x = Metrica, y = Valor, color = Metodo, group = Metodo)) +
+  geom_point(size = 3, position = position_dodge(width = 0.6)) +
+  geom_errorbar(
+    aes(ymin = IC_Inferior, ymax = IC_Superior),
+    width = 0.3,
+    size = 0.8,
+    position = position_dodge(width = 0.6)
+  ) +
+  coord_flip() +
+  scale_color_manual(
+    values = c(
+      "ROSE (0.5)" = "#3498db",
+      "ROSE (0.275)" = "#5dade2",
+      "Under (0.5)" = "#e74c3c",
+      "Under (0.185)" = "#ec7063"
+    ),
+    name = "Configuración"
+  ) +
+  labs(
+    title = "Intervalos de Confianza (95%) por Métrica y Configuración",
+    subtitle = "Barras de error representan límites inferior y superior del IC al 95%",
+    x = "",
+    y = "Valor (%)",
+    caption = "Método: Wilson Score Interval"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(size = 11),
+    axis.text = element_text(size = 10),
+    legend.text = element_text(size = 10)
+  ) +
+  guides(color = guide_legend(nrow = 2))
+
+# Guardar gráfico
+ggsave("graficos/06_intervalos_confianza.png", p_ic, width = 12, height = 7, dpi = 300)
+cat("Gráfico guardado en: graficos/06_intervalos_confianza.png\n")
+
+# ========================================================================
+# 25.3 ANÁLISIS DE SOLAPAMIENTO DE IC
+# ========================================================================
+
+cat("\n")
+cat(strrep("=", 70), "\n")
+cat("ANÁLISIS DE SOLAPAMIENTO DE INTERVALOS\n")
+cat(strrep("=", 70), "\n\n")
+
+# Función para verificar solapamiento
+verificar_solapamiento <- function(ic1_inf, ic1_sup, ic2_inf, ic2_sup) {
+  solapa <- (ic1_inf <= ic2_sup) & (ic2_inf <= ic1_sup)
+  return(!solapa)  # TRUE si NO solapan (diferencia significativa)
+}
+
+# Comparar ROSE vs Under (umbral 0.5)
+cat("Comparación: ROSE (0.5) vs Under (0.5)\n")
+cat(strrep("-", 70), "\n")
+
+for(metrica in unique(ic_completos$Metrica)) {
+  rose_data <- ic_completos[ic_completos$Metodo == "ROSE (0.5)" & ic_completos$Metrica == metrica, ]
+  under_data <- ic_completos[ic_completos$Metodo == "Under (0.5)" & ic_completos$Metrica == metrica, ]
+  
+  significativo <- verificar_solapamiento(
+    rose_data$IC_Inferior, rose_data$IC_Superior,
+    under_data$IC_Inferior, under_data$IC_Superior
+  )
+  
+  cat(sprintf("%-15s: %s\n", metrica, 
+              ifelse(significativo, "Diferencia SIGNIFICATIVA ✓", "No significativa")))
+}
+
+cat("\n✓ = Los IC no se solapan, la diferencia es estadísticamente significativa\n")
+
+# ========================================================================
+# 26. CURVAS PRECISION-RECALL
+# ========================================================================
+
+cat("\n")
+cat(strrep("=", 70), "\n")
+cat("CÁLCULO DE CURVAS PRECISION-RECALL\n")
+cat(strrep("=", 70), "\n\n")
+
+# Función para calcular curva PR manualmente
+calcular_pr_curve <- function(probabilidades, clases_reales, nombre_metodo) {
+  
+  cat("Procesando", nombre_metodo, "...\n")
+  
+  # Convertir clases a 0/1
+  y_true <- as.numeric(clases_reales == "Yes")
+  y_score <- probabilidades[, "Yes"]
+  
+  # Ordenar por probabilidad descendente
+  order_idx <- order(y_score, decreasing = TRUE)
+  y_true_sorted <- y_true[order_idx]
+  y_score_sorted <- y_score[order_idx]
+  
+  # Calcular precision y recall en cada umbral
+  n_positivos <- sum(y_true)
+  
+  precision_vals <- numeric()
+  recall_vals <- numeric()
+  thresholds <- numeric()
+  
+  tp <- 0
+  fp <- 0
+  
+  for(i in 1:length(y_true_sorted)) {
+    if(y_true_sorted[i] == 1) {
+      tp <- tp + 1
+    } else {
+      fp <- fp + 1
+    }
+    
+    precision <- tp / (tp + fp)
+    recall <- tp / n_positivos
+    
+    precision_vals <- c(precision_vals, precision)
+    recall_vals <- c(recall_vals, recall)
+    thresholds <- c(thresholds, y_score_sorted[i])
+  }
+  
+  # Agregar punto (0,1) al inicio
+  precision_vals <- c(1, precision_vals)
+  recall_vals <- c(0, recall_vals)
+  
+  # Calcular AUC-PR usando regla del trapecio
+  auc_pr <- 0
+  for(i in 2:length(recall_vals)) {
+    auc_pr <- auc_pr + (recall_vals[i] - recall_vals[i-1]) * 
+      (precision_vals[i] + precision_vals[i-1]) / 2
+  }
+  
+  cat("  AUC-PR:", round(auc_pr, 4), "\n")
+  
+  return(list(
+    precision = precision_vals,
+    recall = recall_vals,
+    auc_pr = auc_pr
+  ))
+}
+
+# Calcular curvas PR para ambos métodos
+cat("\nCalculando curvas Precision-Recall...\n")
+pr_rose <- calcular_pr_curve(predicciones_prob_rose, datos_test$HeartDisease, "ROSE")
+pr_under <- calcular_pr_curve(predicciones_prob_under, datos_test$HeartDisease, "Under-Sampling")
+
+# Mostrar resultados
+cat("\n")
+cat(strrep("=", 70), "\n")
+cat("RESULTADOS: AUC-PR (Area Under Precision-Recall Curve)\n")
+cat(strrep("=", 70), "\n")
+cat("ROSE           AUC-PR:", round(pr_rose$auc_pr, 4), "\n")
+cat("Under-Sampling AUC-PR:", round(pr_under$auc_pr, 4), "\n")
+cat("Diferencia           :", round(pr_rose$auc_pr - pr_under$auc_pr, 4), "\n")
+
+# Crear dataframe para gráfico
+pr_data_rose <- data.frame(
+  Recall = pr_rose$recall,
+  Precision = pr_rose$precision,
+  Metodo = "ROSE"
+)
+
+pr_data_under <- data.frame(
+  Recall = pr_under$recall,
+  Precision = pr_under$precision,
+  Metodo = "Under-Sampling"
+)
+
+pr_combined <- rbind(pr_data_rose, pr_data_under)
+
+# Calcular prevalencia (línea base)
+prevalencia <- sum(datos_test$HeartDisease == "Yes") / nrow(datos_test)
+
+# Crear gráfico
+cat("\nGenerando gráfico de curvas Precision-Recall...\n")
+
+p_pr <- ggplot(pr_combined, aes(x = Recall, y = Precision, color = Metodo)) +
+  geom_line(size = 1.5) +
+  geom_hline(yintercept = prevalencia, linetype = "dashed", color = "gray50", size = 1) +
+  annotate("text", x = 0.5, y = prevalencia + 0.03, 
+           label = sprintf("Línea base (prevalencia = %.2f%%)", prevalencia * 100),
+           color = "gray30", size = 4) +
+  scale_color_manual(
+    values = c("ROSE" = "#3498db", "Under-Sampling" = "#e74c3c"),
+    name = "Técnica"
+  ) +
+  labs(
+    title = "Curvas Precision-Recall: Comparación entre Técnicas de Balanceo",
+    subtitle = sprintf("AUC-PR: ROSE = %.4f | Under-Sampling = %.4f", 
+                       pr_rose$auc_pr, pr_under$auc_pr),
+    x = "Recall (Sensibilidad)",
+    y = "Precisión (Positive Predictive Value)",
+    caption = "Línea punteada: clasificador aleatorio (prevalencia de la clase positiva)"
+  ) +
+  xlim(0, 1) +
+  ylim(0, 1) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(size = 11),
+    axis.text = element_text(size = 10),
+    legend.text = element_text(size = 11)
+  )
+
+# Guardar gráfico
+ggsave("graficos/07_curvas_precision_recall.png", p_pr, width = 10, height = 7, dpi = 300)
+cat("Gráfico guardado en: graficos/07_curvas_precision_recall.png\n")
+
+# ========================================================================
+# COMPARACIÓN AUC-ROC vs AUC-PR
+# ========================================================================
+
+cat("\n")
+cat(strrep("=", 70), "\n")
+cat("COMPARACIÓN: AUC-ROC vs AUC-PR\n")
+cat(strrep("=", 70), "\n")
+
+# Crear tabla comparativa
+metricas_auc <- data.frame(
+  Metodo = c("ROSE", "Under-Sampling"),
+  AUC_ROC = c(round(auc_value_rose, 4), round(auc_value_under, 4)),
+  AUC_PR = c(round(pr_rose$auc_pr, 4), round(pr_under$auc_pr, 4)),
+  Diferencia = c(
+    round(auc_value_rose - pr_rose$auc_pr, 4),
+    round(auc_value_under - pr_under$auc_pr, 4)
+  ),
+  Ratio_PR_ROC = c(
+    round(pr_rose$auc_pr / auc_value_rose, 3),
+    round(pr_under$auc_pr / auc_value_under, 3)
+  )
+)
+
+print(metricas_auc, row.names = FALSE)
+
+# Interpretación
+cat("\nInterpretación:\n")
+cat("- Diferencia = AUC-ROC - AUC-PR (cuánto más optimista es ROC)\n")
+cat("- Ratio = AUC-PR / AUC-ROC (proporción del rendimiento ROC que se mantiene en PR)\n")
+cat("- Un ratio cercano a 1 indica que ROC no es excesivamente optimista\n")
+cat("- En datasets desbalanceados, AUC-PR es más informativo que AUC-ROC\n")
+
+# Guardar resultados
+write.csv(metricas_auc, "resultados/comparacion_auc_roc_pr.csv", row.names = FALSE)
+cat("\nResultados guardados en: resultados/comparacion_auc_roc_pr.csv\n")
+
+# ========================================================================
+# 27. RESUMEN 
+# ========================================================================
+
+cat("\n")
+cat(strrep("=", 70), "\n")
+cat("ANÁLISIS DE INTERVALOS DE CONFIANZA Y CURVAS PR COMPLETADO\n")
+cat(strrep("=", 70), "\n")
+cat("Archivos generados:\n")
+cat("  - resultados/intervalos_confianza.csv\n")
+cat("  - resultados/comparacion_auc_roc_pr.csv\n")
+cat("  - graficos/06_intervalos_confianza.png\n")
+cat("  - graficos/07_curvas_precision_recall.png\n")
+cat(strrep("=", 70), "\n\n")
